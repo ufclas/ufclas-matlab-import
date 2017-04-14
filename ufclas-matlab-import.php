@@ -81,6 +81,12 @@ function ufclas_matlab_page(){
 	<?php
 }
 
+/**
+ * Process the file upload
+ *
+ * @return bool|null
+ * @since 0.0.0
+ */
 function ufclas_matlab_handle_upload(){
 	if ( empty($_FILES) ){
 		return;
@@ -113,33 +119,42 @@ function ufclas_matlab_handle_upload(){
 			return false;
 		}
 		
-		// Get the remote system absolute path
+		/**
+		 * Get the remote filesystem paths and create matlab-import folder
+		 *
+		 * $upload_root_path:	path to the site uploads folder
+		 * $export_path:		path where zip file will be exported
+		 * $import_path:		path where the html and images exist
+		 */
+		$user_id = get_current_user_id();
 		$upload_dir = wp_upload_dir();
 		$upload_root_path = $upload_dir['basedir'];
 		$upload_root_path = trailingslashit( $upload_root_path ) . 'matlab-import/';
-		
-		// Unique path to unzip file for each user
-		$export_path = $upload_root_path . get_current_user_id() . '-' . wp_hash( get_current_user_id() ) . '/';
-		
-		// Path to html and images
+		$export_path = $upload_root_path . $user_id . '-' . wp_hash( $user_id ) . '/';
 		$import_path = trailingslashit( $export_path ) . 'html/';
 		
-		// Remove any existing export files
+		/**
+		 * Remove any existing export files, add blank index files
+		 */
 		$wp_filesystem->delete( $export_path, true );
-		
-		// Add blank index files to the directories to prevent directory listing
 		$wp_filesystem->touch($upload_root_path . 'index.html');
 		$wp_filesystem->touch($export_path . 'index.html');
 		$wp_filesystem->touch($import_path . 'index.html');
 		
-		// Check for errors unzipping the file
-		if ( $result = unzip_file( $file['file'], $export_path ) !== true ){
+		/**
+		 * Unzip the file and check for errors
+		 */
+		if ( is_wp_error( unzip_file( $file['file'], $export_path ) ) ){
 			return false;
 		}
 		
-		// Construct the object array
-		$object = array(
-			'post_title' => basename($file['file']),
+		/**
+		 * Save the uploaded file to the media library temporarily
+		 *
+		 * @todo Add option to keep the uploaded file
+		 */
+		$file_args = array(
+			'post_title' => sanitize_file_name($file['file']),
 			'post_content' => $file['url'],
 			'post_mime_type' => $file['type'],
 			'guid' => $file['url'],
@@ -147,11 +162,20 @@ function ufclas_matlab_handle_upload(){
 			'post_status' => 'private'
 		);
 		
-		// Save the data in the posts table
-		$file_id = wp_insert_attachment( $object, $file['file'] );
+		$file_id = wp_insert_attachment( $file_args, $file['file'] );
 		
-		$dirlist = $wp_filesystem->dirlist( $import_path, false, true );
-		$exported_files = array('html' => '', 'images' => array() );
+		/**
+		 * Save the uploaded file to the media library temporarily
+		 *
+		 * @todo Add option to keep the uploaded file
+		 */
+		if ( false === ($dirlist = $wp_filesystem->dirlist( $import_path, false, true )) ) {
+			return false;
+		}
+		
+		if ( WP_DEBUG ){
+			error_log( print_r($dirlist, true) );
+		}
 		
 		foreach ( $dirlist as $file_name => $file_data ){
 			if ( $file_data['type'] == 'f' ){
@@ -167,26 +191,18 @@ function ufclas_matlab_handle_upload(){
 			}
 		}
 		
-		if ( WP_DEBUG ) {
-			error_log( 'WP_DEBUG: ' . print_r( $file, true ) );
-			error_log( 'WP_DEBUG: ' . print_r( $upload_dir, true ) );
-			error_log( 'WP_DEBUG: ' . print_r( $exported_files, true ) );
-			error_log( 'WP_DEBUG: ' . $upload_root_path );
-			error_log( 'WP_DEBUG: ' . $export_path );
-			error_log( 'WP_DEBUG: ' . $import_path );
-		}
-		
 		// Set up the post content
 		$html_path = $import_path . '/' . $exported_files['html'];
 		$post_content = ufclas_matlab_get_post_content( $wp_filesystem->get_contents( $html_path ) );
 		
-		$html_page_id = wp_insert_post( array(
-			'post_title' => str_replace( '.html', '', $exported_files['html'] ),
-			'post_content' => $post_content,
+		$post_args = array(
+			'post_title' => sanitize_title( $exported_files['html'] ),
+			'post_content' => wp_kses_post( $post_content ),
 			'post_type' => 'page',
 			'post_author' => get_current_user_id(),
 			'post_status' => 'publish'
-		) );
+		);
+		$post_id = wp_insert_post( $post_args );
 		
 		foreach ( $exported_files['images'] as $image ){
 			$image_path = $import_path . '/' . $image;
@@ -194,10 +210,10 @@ function ufclas_matlab_handle_upload(){
 			$image_upload_path = $upload_dir['path'] . '/' . sanitize_file_name( $image );
 			$image_upload_url = $upload_dir['url'] . '/' . sanitize_file_name( $image );
 			
-			$wp_filesystem->move($image_path, $image_upload_path, true );
+			$wp_filesystem->move( $image_path, $image_upload_path, true );
 			
-			$attachment = array(
-				'post_title' => sanitize_file_name( $image ),
+			$attach_args = array(
+				'post_title' => sanitize_title( $image ),
 				'post_content' => '',
 				'post_mime_type' => $image_type['type'],
 				'post_status' => 'inherit',
@@ -206,22 +222,23 @@ function ufclas_matlab_handle_upload(){
 			
 			require_once( ABSPATH . 'wp-admin/includes/image.php' );
 			
-			$attach_id = wp_insert_attachment( $attachment, $image_upload_path, $html_page_id );
+			$attach_id = wp_insert_attachment( $attach_args, $image_upload_path, $post_id );
 			$attach_data = wp_generate_attachment_metadata( $attach_id, $image_upload_path );
 			wp_update_attachment_metadata( $attach_id, $attach_data );
 			
+			// Update the image url in the page
 			$image_url = wp_get_attachment_url( $attach_id, 'full' );
-			
 			$post_content = str_replace( $image, $image_upload_url, $post_content );
 		}
 		
-		wp_update_post( array( 'ID' => $html_page_id, 'post_content' => $post_content ) );
+		wp_update_post( array( 'ID' => $post_id, 'post_content' => $post_content ) );
 		
-		// Save the page ID temporarily
-		ufclas_matlab_save_page_id( $html_page_id );
+		// Save the page ID temporarily for use in the success admin_notice
+		ufclas_matlab_save_page_id( $post_id );
 		
 		// Clean up files
 		wp_delete_attachment( $file_id );
+		$wp_filesystem->delete( $import_path, true );
 		$wp_filesystem->delete( $export_path, true );
 
 		return true;
@@ -321,4 +338,29 @@ function ufclas_matlab_get_post_content( $html_content ){
 	$new_dom->appendChild( $new_div );
 	
 	return $new_dom->saveHTML();
+}
+
+/**
+ * Connect to the filesystem 
+ *
+ * Assumes the first div contains all the content for the new page
+ *
+ * @params string $html_content
+ * @return bool
+ *
+ * @since 1.1.0
+ */
+function ufclas_matlab_connect_fs( $post_url, $type = '', $error = false, $context = '', $fields = null ){
+	global $wp_filesystem;
+	
+	if ( false === ( $credentials = request_filesystem_credentials( $post_url, $type, $error, $context, $fields ) ) ){
+		return false;
+	}
+	
+	// Check if creadentials are valid
+	if ( ! WP_Filesystem( $credentials ) ) {
+		return false;
+	}
+	
+	return true;
 }
