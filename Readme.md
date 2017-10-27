@@ -9,7 +9,25 @@ Requirements
 
 Installation
 ------------
-- Install and activate for a site.
+Install and activate for a site.
+
+Add the following CSS styles (Appearance > Customizer > Additional CSS):
+
+```css
+pre, code { font-size:12px; }
+tt { font-size: 1.2em; }
+pre { margin:0px 0px 20px; }
+pre.codeinput { padding:10px; border:1px solid #d3d3d3; background:#f7f7f7; }
+pre.codeoutput { padding:10px 11px; margin:0px 0px 20px; color:#4c4c4c; }
+pre.error { color:red; }
+span.keyword { color:#0000FF }
+span.comment { color:#228B22 }
+span.string { color:#A020F0 }
+span.untermstring { color:#B20000 }
+span.syscmd { color:#B28C00 }
+.comment { background-color: transparent; }
+@media print { pre.codeinput, pre.codeoutput { word-wrap:break-word; width:100%; } }
+```
 
 Changelog
 ---------
